@@ -1,0 +1,11 @@
+
+# FleetOps Pro
+data/*.db
+data/*.sqlite
+*.db-journal
+*.db-wal
+*.db-shm
+
+data/*-wal
+data/*-shm
+
