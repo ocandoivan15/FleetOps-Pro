@@ -1,5 +1,6 @@
 import { useState, useEffect, useCallback } from 'react'
-import { getTrips, getTripStats, getFleetStats, getFleet } from '../api'
+import { getTrips, getTripStats, getFleetStats, getFleet, getLiveDrivers } from '../api'
+import { getSocket } from '../socket'
 import FleetMap from '../components/FleetMap'
 
 export default function Dashboard() {
@@ -9,39 +10,53 @@ export default function Dashboard() {
   const [tripStats, setTripStats] = useState({ on_time_rate: 94 })
   const [vehicles, setVehicles] = useState([])
   const [selectedVehicle, setSelectedVehicle] = useState(null)
+  const [liveDrivers, setLiveDrivers] = useState([])
   const [loading, setLoading] = useState(true)
 
   const handleSelectVehicle = useCallback((id) => {
     setSelectedVehicle(id)
   }, [])
 
-  useEffect(() => {
-    async function load() {
-      try {
-        const [tripStatsRes, fleetStatsRes, tripsRes, fleetRes] = await Promise.all([
-          getTripStats(),
-          getFleetStats(),
-          getTrips({ limit: 3 }),
-          getFleet({ limit: 50 }),
-        ])
-        setStats([
-          { label: 'Viajes Hoy', value: String(tripStatsRes.today_trips || 0), change: `+${Math.floor(Math.random() * 15)}%`, color: 'secondary', bar: 78, icon: 'route', changeClass: 'text-on-secondary-fixed-variant bg-secondary-fixed' },
-          { label: 'Uso de Flota', value: `${fleetStatsRes.active || 0}`, change: 'Óptimo', color: 'secondary-container', bar: fleetStatsRes.total ? Math.round((fleetStatsRes.active / fleetStatsRes.total) * 100) : 0, icon: 'analytics', changeClass: 'text-on-secondary-fixed-variant bg-secondary-fixed' },
-          { label: 'Conductores Activos', value: String(tripStatsRes.active_trips || 0), change: `-${Math.floor(Math.random() * 5)}`, color: 'on-tertiary-container', bar: 45, icon: 'person', changeClass: 'text-error bg-error-container' },
-          { label: 'Alertas Pendientes', value: String(tripStatsRes.delayed_trips || 0), change: 'Urgente', color: 'error', bar: 25, icon: 'warning', changeClass: 'text-on-surface-variant bg-surface-container-low' },
-        ])
-        setTrips(tripsRes.data || [])
-        setFleetDist(fleetStatsRes)
-        setVehicles(fleetRes.data || [])
-        setTripStats(tripStatsRes)
-      } catch (e) {
-        console.error('Error loading dashboard data:', e)
-      } finally {
-        setLoading(false)
-      }
+  const load = useCallback(async () => {
+    try {
+      const [tripStatsRes, fleetStatsRes, tripsRes, fleetRes, liveRes] = await Promise.all([
+        getTripStats(),
+        getFleetStats(),
+        getTrips({ limit: 3 }),
+        getFleet({ limit: 50 }),
+        getLiveDrivers().catch(() => []),
+      ])
+      setStats([
+        { label: 'Viajes Hoy', value: String(tripStatsRes.today_trips || 0), change: `+${Math.floor(Math.random() * 15)}%`, color: 'secondary', bar: 78, icon: 'route', changeClass: 'text-on-secondary-fixed-variant bg-secondary-fixed' },
+        { label: 'Uso de Flota', value: `${fleetStatsRes.active || 0}`, change: 'Óptimo', color: 'secondary-container', bar: fleetStatsRes.total ? Math.round((fleetStatsRes.active / fleetStatsRes.total) * 100) : 0, icon: 'analytics', changeClass: 'text-on-secondary-fixed-variant bg-secondary-fixed' },
+        { label: 'Conductores Activos', value: String(tripStatsRes.active_trips || 0), change: `-${Math.floor(Math.random() * 5)}`, color: 'on-tertiary-container', bar: 45, icon: 'person', changeClass: 'text-error bg-error-container' },
+        { label: 'Alertas Pendientes', value: String(tripStatsRes.delayed_trips || 0), change: 'Urgente', color: 'error', bar: 25, icon: 'warning', changeClass: 'text-on-surface-variant bg-surface-container-low' },
+      ])
+      setTrips(tripsRes.data || [])
+      setFleetDist(fleetStatsRes)
+      setVehicles(fleetRes.data || [])
+      setLiveDrivers(liveRes || [])
+      setTripStats(tripStatsRes)
+    } catch (e) {
+      console.error('Error loading dashboard data:', e)
+    } finally {
+      setLoading(false)
     }
-    load()
   }, [])
+
+  useEffect(() => {
+    load()
+
+    // Real-time updates via Socket.IO
+    const socket = getSocket()
+    socket.on('driver:update', load)
+    socket.on('trip:update', load)
+
+    return () => {
+      socket.off('driver:update', load)
+      socket.off('trip:update', load)
+    }
+  }, [load])
 
   const colorMap = {
     secondary: { bg: 'rgba(0,81,213,0.1)', text: '#0051d5', bar: '#0051d5' },
@@ -103,7 +118,7 @@ export default function Dashboard() {
             </div>
             <div className="flex h-[400px]">
               <div className="flex-1 relative">
-                <FleetMap vehicles={vehicles} selectedId={selectedVehicle} onSelectVehicle={handleSelectVehicle} />
+                <FleetMap vehicles={vehicles} liveDrivers={liveDrivers} selectedId={selectedVehicle} onSelectVehicle={handleSelectVehicle} />
               </div>
               <div className="w-[220px] border-l border-outline-variant bg-surface-container-low flex flex-col">
                 <div className="p-3 border-b border-outline-variant">
@@ -228,33 +243,52 @@ export default function Dashboard() {
           </div>
 
           <div className="bg-surface-container-lowest border border-outline-variant rounded-xl p-stack-md">
-            <div className="flex justify-between items-center mb-stack-md">
-              <h3 className="font-bold text-body-lg text-primary">Próximas Salidas</h3>
-              <span className="material-symbols-outlined text-outline">schedule</span>
+            <div className="flex items-center gap-2 mb-stack-md">
+              <h3 className="font-bold text-body-lg text-primary">Conductores en Vivo</h3>
+              {liveDrivers.filter(d => d.lat).length > 0 && (
+                <span className="relative flex w-3 h-3">
+                  <span className="animate-ping absolute inline-flex w-full h-full rounded-full bg-green-400 opacity-75" />
+                  <span className="relative inline-flex w-3 h-3 rounded-full bg-green-500" />
+                </span>
+              )}
             </div>
-            <div className="space-y-gutter relative before:absolute before:left-[15px] before:top-2 before:bottom-2 before:w-[2px] before:bg-surface-container">
-              {departures.map((d, i) => (
-                <div key={i} className={`relative pl-10 ${d.opacity || ''}`}>
-                  <div className={`absolute left-0 top-1 w-8 h-8 rounded-full ${d.iconBg} flex items-center justify-center z-10 shadow-sm border-2 border-surface-container-lowest`}>
-                    <span className="material-symbols-outlined text-[16px]">{d.icon}</span>
-                  </div>
-                  <div className="p-3 bg-surface rounded-lg border border-outline-variant/30">
-                    <div className="flex justify-between items-start">
-                      <p className="font-bold text-primary">{d.time} · {d.route}</p>
-                      <span className="text-label-md font-bold text-secondary">{d.in}</span>
+            {liveDrivers.length === 0 ? (
+              <div className="text-center py-6 text-on-surface-variant">
+                <span className="material-symbols-outlined text-[36px]">person_off</span>
+                <p className="text-body-sm mt-1">Ningún conductor activo</p>
+              </div>
+            ) : (
+              <div className="space-y-3">
+                {liveDrivers.map(d => (
+                  <div key={d.id} className="flex items-center gap-3 p-3 bg-surface-container-low rounded-xl">
+                    <div className={`w-10 h-10 rounded-full flex items-center justify-center text-white font-bold shrink-0 ${
+                      d.lat ? 'bg-green-500' : 'bg-surface-container-highest text-on-surface-variant'
+                    }`}>
+                      {d.name.charAt(0)}
                     </div>
-                    <p className="text-body-sm text-on-surface-variant">{d.desc}</p>
-                    <div className="mt-2 flex items-center gap-2">
-                      {d.driver && <span className="text-label-md text-on-surface-variant">Conductor: {d.driver}</span>}
-                      {d.alert && <span className={`text-label-md font-bold ${d.alertClass}`}>{d.alert}</span>}
+                    <div className="flex-1 min-w-0">
+                      <div className="flex items-center gap-2">
+                        <p className="font-bold text-body-sm text-on-surface">{d.name}</p>
+                        {d.lat && <span className="w-2 h-2 rounded-full bg-green-500 shrink-0" />}
+                      </div>
+                      {d.route_name ? (
+                        <p className="text-label-md text-on-surface-variant truncate">{d.route_name}</p>
+                      ) : (
+                        <p className="text-label-md text-on-surface-variant">Sin viaje asignado</p>
+                      )}
+                      {d.last_gps_time && (
+                        <p className="text-label-md text-green-700 text-xs">
+                          GPS: {new Date(d.last_gps_time + 'Z').toLocaleTimeString()}
+                        </p>
+                      )}
                     </div>
+                    {d.trip_code && (
+                      <span className="text-label-md font-bold text-secondary shrink-0">{d.trip_code}</span>
+                    )}
                   </div>
-                </div>
-              ))}
-            </div>
-            <button className="w-full mt-gutter py-2 text-body-sm font-bold text-secondary border border-secondary/30 rounded-lg hover:bg-secondary/5 transition-colors">
-              Gestionar Todas las Salidas
-            </button>
+                ))}
+              </div>
+            )}
           </div>
         </div>
       </div>

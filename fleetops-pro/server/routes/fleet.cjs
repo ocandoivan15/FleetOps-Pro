@@ -69,6 +69,11 @@ router.post('/', (req, res) => {
   const result = db.prepare(`
     INSERT INTO vehicles (vehicle_id, plate, model, year, type, km, capacity) VALUES (?, ?, ?, ?, ?, ?, ?)
   `).run(vehicle_id, plate, model, year || null, type || 'bus', km != null ? km : 0, capacity != null ? capacity : 40);
+
+  // Activity log
+  db.prepare(`INSERT INTO activity_log (action, description, entity_type, entity_id) VALUES (?, ?, ?, ?)`)
+    .run('vehicle.created', `Vehículo ${vehicle_id} agregado a la flota`, 'vehicle', result.lastInsertRowid);
+
   res.status(201).json({ id: result.lastInsertRowid });
 });
 
@@ -104,7 +109,7 @@ router.post('/:id/send-to-taller', (req, res) => {
   const { id } = req.params;
   const { checklist, reason, explanation, type, km } = req.body;
 
-  const vehicle = db.prepare('SELECT id FROM vehicles WHERE id = ?').get(id);
+  const vehicle = db.prepare('SELECT id, vehicle_id FROM vehicles WHERE id = ?').get(id);
   if (!vehicle) return res.status(404).json({ error: 'Vehicle not found' });
 
   const typeLabel = type === 'reparacion' ? 'Reparación' : 'Mantenimiento';
@@ -129,6 +134,15 @@ router.post('/:id/send-to-taller', (req, res) => {
     }
 
     db.prepare("UPDATE vehicles SET status = 'maintenance', updated_at = datetime('now') WHERE id = ?").run(id);
+
+    db.prepare(`INSERT INTO notifications (type, title, message, entity_type, entity_id) VALUES (?, ?, ?, ?, ?)`)
+      .run('maintenance_due', 'Vehículo en taller', `El vehículo ${vehicle.vehicle_id} ha sido enviado a taller`, 'vehicle', id);
+
+    // Activity log
+    db.prepare(`INSERT INTO activity_log (action, description, entity_type, entity_id) VALUES (?, ?, ?, ?)`)
+      .run('vehicle.taller', `Vehículo ${vehicle.vehicle_id} enviado a taller`, 'vehicle', id);
+
+    try { req.app.get('io').emit('notification'); } catch(e) {}
   });
   txn();
 
@@ -161,6 +175,14 @@ router.patch('/:id', (req, res) => {
   params.push(req.params.id);
 
   db.prepare(`UPDATE vehicles SET ${updates.join(', ')} WHERE id = ?`).run(...params);
+
+  // Activity log
+  const vehicle = db.prepare('SELECT vehicle_id FROM vehicles WHERE id = ?').get(req.params.id);
+  if (vehicle) {
+    db.prepare(`INSERT INTO activity_log (action, description, entity_type, entity_id) VALUES (?, ?, ?, ?)`)
+      .run('vehicle.updated', `Vehículo ${vehicle.vehicle_id} actualizado`, 'vehicle', req.params.id);
+  }
+
   res.json({ ok: true });
 });
 
@@ -168,8 +190,12 @@ router.patch('/:id', (req, res) => {
 router.delete('/:id', (req, res) => {
   const { id } = req.params;
 
-  const vehicle = db.prepare('SELECT id FROM vehicles WHERE id = ?').get(id);
+  const vehicle = db.prepare('SELECT id, vehicle_id FROM vehicles WHERE id = ?').get(id);
   if (!vehicle) return res.status(404).json({ error: 'Vehicle not found' });
+
+  // Activity log
+  db.prepare(`INSERT INTO activity_log (action, description, entity_type, entity_id) VALUES (?, ?, ?, ?)`)
+    .run('vehicle.deleted', `Vehículo ${vehicle.vehicle_id} eliminado de la flota`, 'vehicle', id);
 
   const txn = db.transaction(() => {
     db.prepare("UPDATE trips SET vehicle_id = NULL WHERE vehicle_id = ?").run(id);

@@ -1,0 +1,43 @@
+@import "tailwindcss";
+
+@theme {
+  --color-primary: #0051d5;
+  --color-on-primary: #ffffff;
+  --color-primary-container: #d7e2ff;
+  --color-on-primary-container: #00174b;
+  --color-secondary: #316bf3;
+  --color-on-secondary: #ffffff;
+  --color-secondary-container: #dbe1ff;
+  --color-on-secondary-container: #001657;
+  --color-surface: #faf9fd;
+  --color-surface-dim: #dad9e0;
+  --color-surface-container-lowest: #ffffff;
+  --color-surface-container-low: #f4f3f8;
+  --color-surface-container: #eeedf2;
+  --color-surface-container-high: #e8e7ed;
+  --color-surface-container-highest: #e2e2e7;
+  --color-on-surface: #1b1b1f;
+  --color-on-surface-variant: #45464f;
+  --color-outline: #757680;
+  --color-outline-variant: #c5c6d0;
+  --color-error: #ba1a1a;
+  --color-on-error: #ffffff;
+  --color-error-container: #ffdad6;
+  --color-on-error-container: #410002;
+  --color-tertiary: #316bf3;
+  --color-background: #faf9fd;
+  --color-on-background: #1b1b1f;
+}
+
+body {
+  font-family: 'Inter', system-ui, -apple-system, sans-serif;
+  background: var(--color-background);
+  color: var(--color-on-surface);
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+}
+
+/* Safe area for mobile notches */
+.pb-safe {
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}

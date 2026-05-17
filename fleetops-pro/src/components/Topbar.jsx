@@ -1,7 +1,59 @@
+import { useState, useEffect, useCallback, useRef } from 'react'
 import { useAuth } from '../AuthContext'
+import { getNotifications, getUnreadCount, getActivity, markAsRead, markAllAsRead } from '../api'
+import { getSocket } from '../socket'
+import NotificationsPanel from './NotificationsPanel'
+import ActivityPanel from './ActivityPanel'
 
 export default function Topbar({ title = 'Centro de Operaciones' }) {
   const { user, logout } = useAuth()
+  const [notifications, setNotifications] = useState([])
+  const [unreadCount, setUnreadCount] = useState(0)
+  const [activities, setActivities] = useState([])
+  const [showPanel, setShowPanel] = useState(false)
+  const [showActivity, setShowActivity] = useState(false)
+  const bellRef = useRef(null)
+  const historyRef = useRef(null)
+
+  const fetchData = useCallback(async () => {
+    try {
+      const [notifs, { count }, acts] = await Promise.all([getNotifications(), getUnreadCount(), getActivity()])
+      setNotifications(notifs)
+      setUnreadCount(count)
+      setActivities(acts)
+    } catch (e) {
+      // Silently fail — API may not be available yet
+    }
+  }, [])
+
+  useEffect(() => {
+    fetchData()
+
+    // Real-time updates via Socket.IO
+    const socket = getSocket()
+    socket.on('notification', fetchData)
+
+    // Fallback polling cada 60s
+    const interval = setInterval(fetchData, 60000)
+    return () => {
+      socket.off('notification', fetchData)
+      clearInterval(interval)
+    }
+  }, [fetchData])
+
+  const handleBellClick = () => setShowPanel((prev) => !prev)
+
+  const handleMarkRead = async (id) => {
+    await markAsRead(id)
+    fetchData()
+  }
+
+  const handleMarkAllRead = async () => {
+    await markAllAsRead()
+    fetchData()
+  }
+
+  const handleClosePanel = () => setShowPanel(false)
 
   return (
     <header className="fixed top-0 right-0 left-0 md:left-[240px] z-30 bg-surface-container-lowest/80 backdrop-blur-md border-b border-outline-variant">
@@ -17,13 +69,42 @@ export default function Topbar({ title = 'Centro de Operaciones' }) {
           </div>
         </div>
         <div className="flex items-center gap-4">
-          <button className="relative p-2 text-on-surface-variant hover:text-secondary transition-colors rounded-full">
-            <span className="material-symbols-outlined">notifications</span>
-            <span className="absolute top-1 right-1 w-2 h-2 bg-error rounded-full" />
-          </button>
-          <button className="p-2 text-on-surface-variant hover:text-secondary transition-colors rounded-full">
-            <span className="material-symbols-outlined">history</span>
-          </button>
+          <div className="relative" ref={bellRef}>
+            <button
+              onClick={handleBellClick}
+              className="relative p-2 text-on-surface-variant hover:text-secondary transition-colors rounded-full"
+            >
+              <span className="material-symbols-outlined">notifications</span>
+              {unreadCount > 0 && (
+                <span className="absolute -top-0.5 -right-0.5 min-w-[18px] h-[18px] flex items-center justify-center bg-error text-on-error text-[10px] font-bold rounded-full px-1">
+                  {unreadCount > 9 ? '9+' : unreadCount}
+                </span>
+              )}
+            </button>
+            {showPanel && (
+              <NotificationsPanel
+                notifications={notifications}
+                unreadCount={unreadCount}
+                onMarkRead={handleMarkRead}
+                onMarkAllRead={handleMarkAllRead}
+                onClose={handleClosePanel}
+              />
+            )}
+          </div>
+          <div className="relative" ref={historyRef}>
+            <button
+              onClick={() => setShowActivity(prev => !prev)}
+              className="relative p-2 text-on-surface-variant hover:text-secondary transition-colors rounded-full"
+            >
+              <span className="material-symbols-outlined">history</span>
+            </button>
+            {showActivity && (
+              <ActivityPanel
+                activities={activities}
+                onClose={() => setShowActivity(false)}
+              />
+            )}
+          </div>
           <div className="h-8 w-[1px] bg-outline-variant mx-2" />
           <div className="flex items-center gap-3">
             <div className="text-right hidden sm:block">

@@ -91,6 +91,11 @@ db.exec(`
   );
 `);
 
+// Migration: add driver auth columns
+try { db.exec("ALTER TABLE drivers ADD COLUMN cedula TEXT"); } catch(e) {}
+try { db.exec("CREATE UNIQUE INDEX IF NOT EXISTS idx_drivers_cedula ON drivers(cedula)"); } catch(e) {}
+try { db.exec("ALTER TABLE drivers ADD COLUMN password_hash TEXT"); } catch(e) {}
+
 // Migration: add client_id for databases created before the column existed
 try { db.exec("ALTER TABLE trips ADD COLUMN client_id INTEGER REFERENCES clients(id)"); } catch(e) {}
 
@@ -147,6 +152,41 @@ db.exec(`
     active INTEGER DEFAULT 1,
     created_at TEXT DEFAULT (datetime('now')),
     updated_at TEXT DEFAULT (datetime('now'))
+  );
+`);
+
+// ---------------------------------------------------------------------------
+// Notifications table
+// ---------------------------------------------------------------------------
+db.exec(`
+  CREATE TABLE IF NOT EXISTS notifications (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    type TEXT NOT NULL,
+    title TEXT NOT NULL,
+    message TEXT NOT NULL,
+    entity_type TEXT,
+    entity_id INTEGER,
+    read INTEGER DEFAULT 0,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS activity_log (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    action TEXT NOT NULL,
+    description TEXT NOT NULL,
+    user_name TEXT DEFAULT 'Sistema',
+    entity_type TEXT,
+    entity_id INTEGER,
+    created_at TEXT DEFAULT (datetime('now'))
+  );
+
+  CREATE TABLE IF NOT EXISTS gps_points (
+    id INTEGER PRIMARY KEY AUTOINCREMENT,
+    driver_id INTEGER REFERENCES drivers(id),
+    trip_id INTEGER REFERENCES trips(id),
+    lat REAL NOT NULL,
+    lng REAL NOT NULL,
+    recorded_at TEXT DEFAULT (datetime('now'))
   );
 `);
 
@@ -228,22 +268,24 @@ if (vehicleCount === 0) {
     insertVehicle.run(...v);
   }
 
+  const defaultHash = crypto.createHash('sha256').update('123456').digest('hex');
+
   const insertDriver = db.prepare(`
-    INSERT INTO drivers (name, email, license, phone, status, total_hours)
-    VALUES (?, ?, ?, ?, ?, ?)
+    INSERT INTO drivers (name, email, cedula, license, phone, status, total_hours, password_hash)
+    VALUES (?, ?, ?, ?, ?, ?, ?, ?)
   `);
 
   const drivers = [
-    ['Marcus Chen', 'marcus.chen@fleetops.pro', 'TX-992-B8841', '555-0101', 'on_duty', 164.5],
-    ['Sarah Jenkins', 'sarah.jenkins@fleetops.pro', 'FL-112-D0092', '555-0102', 'rest', 192.0],
-    ['David Miller', 'david.miller@fleetops.pro', 'CA-556-C1123', '555-0103', 'on_duty', 45.2],
-    ['Elena Rodriguez', 'elena.rodriguez@fleetops.pro', 'NY-778-F3321', '555-0104', 'on_duty', 208.1],
-    ['Marcus Sterling', 'marcus.sterling@fleetops.pro', 'TX-992-B8841', '555-0105', 'on_duty', 164.5],
-    ['Jameson Wu', 'jameson.wu@fleetops.pro', 'NY-556-C1123', '555-0106', 'off_duty', 45.2],
-    ['Carlos Mendez', 'carlos.mendez@fleetops.pro', 'CA-778-F3321', '555-0107', 'critical', 208.1],
-    ['Elena Rossi', 'elena.rossi@fleetops.pro', 'IL-334-D5566', '555-0108', 'rest', 120.3],
-    ['James Wilson', 'james.wilson@fleetops.pro', 'WA-221-E7788', '555-0109', 'on_duty', 89.7],
-    ['Robert Chen', 'robert.chen@fleetops.pro', 'OR-113-F9900', '555-0110', 'on_duty', 145.2],
+    ['Marcus Chen', 'marcus.chen@fleetops.pro', '12345678', 'TX-992-B8841', '555-0101', 'on_duty', 164.5, defaultHash],
+    ['Sarah Jenkins', 'sarah.jenkins@fleetops.pro', '23456789', 'FL-112-D0092', '555-0102', 'rest', 192.0, defaultHash],
+    ['David Miller', 'david.miller@fleetops.pro', '34567890', 'CA-556-C1123', '555-0103', 'on_duty', 45.2, defaultHash],
+    ['Elena Rodriguez', 'elena.rodriguez@fleetops.pro', '45678901', 'NY-778-F3321', '555-0104', 'on_duty', 208.1, defaultHash],
+    ['Marcus Sterling', 'marcus.sterling@fleetops.pro', '56789012', 'TX-992-B8841', '555-0105', 'on_duty', 164.5, defaultHash],
+    ['Jameson Wu', 'jameson.wu@fleetops.pro', '67890123', 'NY-556-C1123', '555-0106', 'off_duty', 45.2, defaultHash],
+    ['Carlos Mendez', 'carlos.mendez@fleetops.pro', '78901234', 'CA-778-F3321', '555-0107', 'critical', 208.1, defaultHash],
+    ['Elena Rossi', 'elena.rossi@fleetops.pro', '89012345', 'IL-334-D5566', '555-0108', 'rest', 120.3, defaultHash],
+    ['James Wilson', 'james.wilson@fleetops.pro', '90123456', 'WA-221-E7788', '555-0109', 'on_duty', 89.7, defaultHash],
+    ['Robert Chen', 'robert.chen@fleetops.pro', '01234567', 'OR-113-F9900', '555-0110', 'on_duty', 145.2, defaultHash],
   ];
 
   for (const d of drivers) {

@@ -31,6 +31,23 @@ function vehicleIcon(color) {
   })
 }
 
+function driverIcon() {
+  return L.divIcon({
+    className: '',
+    html: `<div style="
+      width:28px;height:28px;
+      background:#16a34a;
+      border:3px solid white;
+      border-radius:50%;
+      display:flex;align-items:center;justify-content:center;
+      box-shadow:0 2px 8px rgba(0,0,0,0.3);
+      font-size:14px;color:white;
+    "><span style="font-family:'Material Symbols Outlined';font-size:14px;">person</span></div>`,
+    iconSize: [28, 28],
+    iconAnchor: [14, 14],
+  })
+}
+
 function popupContent(v) {
   const sc = { active: '#16a34a', maintenance: '#d97706', inactive: '#6b7280', out_of_service: '#6b7280' }[v.status] || '#6b7280'
   const sl = { active: 'Activo', maintenance: 'En Taller', inactive: 'Inactivo', out_of_service: 'Fuera de Servicio' }[v.status] || v.status
@@ -73,7 +90,7 @@ function generatePos(index, total) {
   return [CENTER[0] + Math.cos(angle) * radius, CENTER[1] + Math.sin(angle) * radius]
 }
 
-export default function FleetMap({ vehicles = [], selectedId, onSelectVehicle }) {
+export default function FleetMap({ vehicles = [], liveDrivers = [], selectedId, onSelectVehicle }) {
   const mapRef = useRef(null)
   const initialized = useRef(false)
   const markersRef = useRef({})
@@ -163,10 +180,34 @@ export default function FleetMap({ vehicles = [], selectedId, onSelectVehicle })
         .bindPopup(popupContent(v), { closeButton: false, maxWidth: 280 })
         .on('click', () => onSelectVehicle?.(v.id))
 
-      markersRef.current[v.id] = marker
+      markersRef.current['v_' + v.id] = marker
       clusterRef.current.addLayer(marker)
     })
-  }, [vehicles, onSelectVehicle])
+
+    // Driver markers with real GPS
+    liveDrivers.filter(d => d.lat && d.lng).forEach(d => {
+      const marker = L.marker([d.lat, d.lng], { icon: driverIcon() })
+        .bindPopup(`
+          <div style="font-family:Inter,system-ui,sans-serif;min-width:200px;">
+            <div style="display:flex;align-items:center;gap:8px;margin-bottom:8px;">
+              <div style="width:36px;height:36px;border-radius:50%;background:#16a34a;display:flex;align-items:center;justify-content:center;color:white;font-size:18px;">
+                <span style="font-family:'Material Symbols Outlined'">person</span>
+              </div>
+              <div>
+                <p style="font-weight:700;font-size:14px;margin:0;color:#1a1a2e;">${d.name}</p>
+                <p style="font-size:11px;color:#666;margin:2px 0 0;">C.I. ${d.cedula}</p>
+              </div>
+            </div>
+            ${d.route_name ? `<p style="font-size:12px;color:#1a1a2e;margin:0 0 4px;"><strong>Ruta:</strong> ${d.route_name}</p>` : ''}
+            ${d.trip_code ? `<p style="font-size:12px;color:#666;margin:0 0 4px;"><strong>Viaje:</strong> ${d.trip_code}</p>` : ''}
+            ${d.last_gps_time ? `<p style="font-size:11px;color:#888;margin:0;">GPS: ${new Date(d.last_gps_time + 'Z').toLocaleTimeString()}</p>` : ''}
+          </div>
+        `, { closeButton: false, maxWidth: 260 })
+
+      markersRef.current['d_' + d.id] = marker
+      clusterRef.current.addLayer(marker)
+    })
+  }, [vehicles, liveDrivers, onSelectVehicle])
 
   // Zoom to selected
   useEffect(() => {

@@ -101,6 +101,17 @@ router.post('/', (req, res) => {
     db.prepare('UPDATE clients SET total_trips = total_trips + 1, last_trip_date = datetime(\'now\') WHERE id = ?').run(client_id);
   }
 
+  // Notify: new trip created
+  db.prepare(`INSERT INTO notifications (type, title, message, entity_type, entity_id) VALUES (?, ?, ?, ?, ?)`)
+    .run('trip_created', 'Nuevo viaje', `Viaje ${trip_id} creado - ${route_name}`, 'trip', result.lastInsertRowid);
+
+  // Activity log
+  db.prepare(`INSERT INTO activity_log (action, description, entity_type, entity_id) VALUES (?, ?, ?, ?)`)
+    .run('trip.created', `Viaje ${trip_id} creado - ${route_name}`, 'trip', result.lastInsertRowid);
+
+  try { req.app.get('io').emit('notification'); } catch(e) {}
+  try { req.app.get('io').emit('trip:update'); } catch(e) {}
+
   res.status(201).json({ id: result.lastInsertRowid, trip_id });
 });
 
@@ -129,6 +140,22 @@ router.patch('/:id', (req, res) => {
 
   params.push(req.params.id);
   db.prepare(`UPDATE trips SET ${updates.join(', ')} WHERE id = ?`).run(...params);
+
+  // Notify: trip delayed
+  if (status === 'delayed') {
+    const trip = db.prepare('SELECT trip_id FROM trips WHERE id = ?').get(req.params.id);
+    if (trip) {
+      db.prepare(`INSERT INTO notifications (type, title, message, entity_type, entity_id) VALUES (?, ?, ?, ?, ?)`)
+        .run('trip_delayed', 'Viaje retrasado', `El viaje ${trip.trip_id} está retrasado`, 'trip', req.params.id);
+
+      // Activity log
+      db.prepare(`INSERT INTO activity_log (action, description, entity_type, entity_id) VALUES (?, ?, ?, ?)`)
+        .run('trip.delayed', `Viaje ${trip.trip_id} marcado como retrasado`, 'trip', req.params.id);
+
+      try { req.app.get('io').emit('notification'); } catch(e) {}
+    }
+  }
+
   res.json({ ok: true });
 });
 
@@ -136,6 +163,14 @@ router.patch('/:id', (req, res) => {
 router.patch('/:id/assign-driver', (req, res) => {
   const { driver_id } = req.body;
   db.prepare("UPDATE trips SET driver_id = ?, updated_at = datetime('now') WHERE id = ?").run(driver_id || null, req.params.id);
+
+  // Activity log
+  const trip = db.prepare('SELECT trip_id FROM trips WHERE id = ?').get(req.params.id);
+  if (trip) {
+    db.prepare(`INSERT INTO activity_log (action, description, entity_type, entity_id) VALUES (?, ?, ?, ?)`)
+      .run('trip.assigned', `Viaje ${trip.trip_id} asignado a conductor`, 'trip', req.params.id);
+  }
+
   res.json({ ok: true });
 });
 

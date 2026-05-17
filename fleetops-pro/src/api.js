@@ -75,6 +75,10 @@ export function getDriverStats() {
   return fetchJSON('/drivers/stats');
 }
 
+export function getLiveDrivers() {
+  return fetchJSON('/drivers/live');
+}
+
 export function getAvailableDrivers() {
   return fetchJSON('/drivers/available');
 }
@@ -155,6 +159,28 @@ export function getMe() {
     if (!r.ok) throw new Error('No autorizado');
     return r.json();
   });
+}
+
+// ── Notifications ──────────────────────────────────
+export function getNotifications() {
+  return fetchJSON('/notifications');
+}
+
+export function getUnreadCount() {
+  return fetchJSON('/notifications/unread-count');
+}
+
+export function markAsRead(id) {
+  return fetchJSON(`/notifications/${id}/read`, { method: 'PATCH' });
+}
+
+export function markAllAsRead() {
+  return fetchJSON('/notifications/read-all', { method: 'PATCH' });
+}
+
+// ── Activity ────────────────────────────────────────
+export function getActivity() {
+  return fetchJSON('/activity');
 }
 
 // ── Users ──────────────────────────────────────────

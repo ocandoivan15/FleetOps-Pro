@@ -38,6 +38,26 @@ router.get('/', (req, res) => {
   });
 });
 
+// GET /api/drivers/live — active drivers with GPS + trip info
+router.get('/live', (req, res) => {
+  const drivers = db.prepare(`
+    SELECT
+      d.id, d.name, d.cedula, d.status,
+      t.id as trip_id, t.trip_id as trip_code, t.route_name, t.status as trip_status,
+      g.lat, g.lng, g.recorded_at as last_gps_time
+    FROM drivers d
+    LEFT JOIN trips t ON t.driver_id = d.id AND t.status IN ('in_progress', 'pending')
+    LEFT JOIN (
+      SELECT driver_id, lat, lng, recorded_at
+      FROM gps_points
+      WHERE id IN (SELECT MAX(id) FROM gps_points GROUP BY driver_id)
+    ) g ON g.driver_id = d.id
+    WHERE d.status IN ('on_duty', 'critical')
+    ORDER BY d.name
+  `).all();
+  res.json(drivers);
+});
+
 // GET /api/drivers/stats — driver aggregate stats
 router.get('/stats', (req, res) => {
   const stats = db.prepare(`
@@ -62,21 +82,27 @@ router.get('/available', (req, res) => {
 
 // POST /api/drivers — add new driver
 router.post('/', (req, res) => {
-  const { name, email, license, phone } = req.body;
+  const { name, email, cedula, license, phone } = req.body;
   const result = db.prepare(`
-    INSERT INTO drivers (name, email, license, phone) VALUES (?, ?, ?, ?)
-  `).run(name, email, license, phone || null);
+    INSERT INTO drivers (name, email, cedula, license, phone) VALUES (?, ?, ?, ?, ?)
+  `).run(name, email, cedula || null, license, phone || null);
+
+  // Activity log
+  db.prepare(`INSERT INTO activity_log (action, description, entity_type, entity_id) VALUES (?, ?, ?, ?)`)
+    .run('driver.created', `Conductor ${name} agregado`, 'driver', result.lastInsertRowid);
+
   res.status(201).json({ id: result.lastInsertRowid });
 });
 
 // PATCH /api/drivers/:id — update driver
 router.patch('/:id', (req, res) => {
-  const { name, email, license, phone, status, total_hours } = req.body;
+  const { name, email, cedula, license, phone, status, total_hours } = req.body;
   const updates = [];
   const params = [];
 
   if (name !== undefined) { updates.push('name = ?'); params.push(name); }
   if (email !== undefined) { updates.push('email = ?'); params.push(email); }
+  if (cedula !== undefined) { updates.push('cedula = ?'); params.push(cedula); }
   if (license !== undefined) { updates.push('license = ?'); params.push(license); }
   if (phone !== undefined) { updates.push('phone = ?'); params.push(phone); }
   if (status) { updates.push('status = ?'); params.push(status); }
@@ -85,6 +111,20 @@ router.patch('/:id', (req, res) => {
   params.push(req.params.id);
 
   db.prepare(`UPDATE drivers SET ${updates.join(', ')} WHERE id = ?`).run(...params);
+
+  // Notify: driver status changed to critical
+  if (status === 'critical') {
+    const driver = db.prepare('SELECT name FROM drivers WHERE id = ?').get(req.params.id);
+    if (driver) {
+      db.prepare(`INSERT INTO notifications (type, title, message, entity_type, entity_id) VALUES (?, ?, ?, ?, ?)`)
+        .run('driver_critical', 'Conductor crítico', `El conductor ${driver.name} está en estado crítico`, 'driver', req.params.id);
+
+      // Activity log
+      db.prepare(`INSERT INTO activity_log (action, description, entity_type, entity_id) VALUES (?, ?, ?, ?)`)
+        .run('driver.critical', `Conductor ${driver.name} en estado crítico`, 'driver', req.params.id);
+    }
+  }
+
   res.json({ ok: true });
 });
 
@@ -92,8 +132,12 @@ router.patch('/:id', (req, res) => {
 router.delete('/:id', (req, res) => {
   const { id } = req.params;
 
-  const driver = db.prepare('SELECT id FROM drivers WHERE id = ?').get(id);
+  const driver = db.prepare('SELECT id, name FROM drivers WHERE id = ?').get(id);
   if (!driver) return res.status(404).json({ error: 'Driver not found' });
+
+  // Activity log
+  db.prepare(`INSERT INTO activity_log (action, description, entity_type, entity_id) VALUES (?, ?, ?, ?)`)
+    .run('driver.deleted', `Conductor ${driver.name} eliminado`, 'driver', id);
 
   const txn = db.transaction(() => {
     db.prepare("UPDATE trips SET driver_id = NULL WHERE driver_id = ?").run(id);

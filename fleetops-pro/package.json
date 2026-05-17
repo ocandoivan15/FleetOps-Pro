@@ -5,8 +5,10 @@
   "type": "module",
   "scripts": {
     "dev": "vite",
+    "dev:lan": "vite --host",
     "dev:api": "node server/index.cjs",
     "dev:all": "concurrently \"npm run dev\" \"npm run dev:api\"",
+    "dev:lan:all": "concurrently --names \"API,ADMIN,CHOFER\" --prefix-colors \"green,blue,yellow\" \"npm run dev:api\" \"vite --host\" \"cd driver-app && npx vite --host\"",
     "build": "vite build",
     "lint": "eslint .",
     "preview": "vite preview"
@@ -22,6 +24,8 @@
     "react-dom": "^19.2.6",
     "react-leaflet": "^5.0.0",
     "react-router-dom": "^7.15.0",
+    "socket.io": "^4.8.3",
+    "socket.io-client": "^4.8.3",
     "tailwindcss": "^4.3.0"
   },
   "devDependencies": {

@@ -35,6 +35,11 @@ router.post('/', (req, res) => {
     INSERT INTO clients (name, email, phone, address, company, notes)
     VALUES (?, ?, ?, ?, ?, ?)
   `).run(name, email || null, phone || null, address || null, company || null, notes || null);
+
+  // Activity log
+  db.prepare(`INSERT INTO activity_log (action, description, entity_type, entity_id) VALUES (?, ?, ?, ?)`)
+    .run('client.created', `Cliente ${name} registrado`, 'client', result.lastInsertRowid);
+
   res.status(201).json({ id: result.lastInsertRowid });
 });
 
@@ -52,8 +57,12 @@ router.patch('/:id', (req, res) => {
 router.delete('/:id', (req, res) => {
   const { id } = req.params;
 
-  const client = db.prepare('SELECT id FROM clients WHERE id = ?').get(id);
+  const client = db.prepare('SELECT id, name FROM clients WHERE id = ?').get(id);
   if (!client) return res.status(404).json({ error: 'Client not found' });
+
+  // Activity log
+  db.prepare(`INSERT INTO activity_log (action, description, entity_type, entity_id) VALUES (?, ?, ?, ?)`)
+    .run('client.deleted', `Cliente ${client.name} eliminado`, 'client', id);
 
   const txn = db.transaction(() => {
     db.prepare("UPDATE trips SET client_id = NULL WHERE client_id = ?").run(id);
